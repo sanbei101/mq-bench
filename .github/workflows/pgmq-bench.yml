@@ -1,0 +1,90 @@
+name: PGMQ Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      clients:
+        description: '并发客户端数量'
+        required: true
+        default: '50'
+      duration:
+        description: '每个测试的持续时间/秒'
+        required: true
+        default: '30'
+
+jobs:
+  benchmark:
+    name: Run pgbench
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: quay.io/tembo/pg18-pgmq:latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: pgmq_bench
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: 检出代码 (Checkout)
+        uses: actions/checkout@v6
+
+      - name: 安装 PostgreSQL
+        run: |
+          sudo apt update
+          sudo apt install -y postgresql-client
+
+      - name: 初始化 PGMQ 扩展和队列
+        env:
+          PGPASSWORD: password
+        run: |
+          psql -h localhost -U postgres -d pgmq_bench -c "CREATE EXTENSION IF NOT EXISTS pgmq;"
+          psql -h localhost -U postgres -d pgmq_bench -c "SELECT pgmq.create('bench_queue_durable');"
+          psql -h localhost -U postgres -d pgmq_bench -c "SELECT pgmq.create_unlogged('bench_queue_fast');"
+
+      - name: 生成 pgbench 测试脚本
+        run: |
+          # 1. 写入持久化队列发送脚本
+          echo "SELECT pgmq.send('bench_queue_durable', '{\"task\": \"bench\", \"ts\": \"2023-10-01\"}');" > send_durable.sql
+          # 2. 写入持久化队列消费脚本
+          echo "SELECT pgmq.pop('bench_queue_durable');" > read_durable.sql
+
+          # 3. 写入无日志队列发送脚本
+          echo "SELECT pgmq.send('bench_queue_fast', '{\"task\": \"bench\", \"ts\": \"2023-10-01\"}');" > send_fast.sql
+          # 4. 写入无日志队列消费脚本
+          echo "SELECT pgmq.pop('bench_queue_fast');" > read_fast.sql
+
+      - name: 压测 1 - 持久化队列 (发送)
+        env:
+          PGPASSWORD: password
+        run: |
+          echo "=== 🧱 持久化队列 (Durable) - Send ==="
+          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f send_durable.sql
+
+      - name: 压测 2 - 无日志极速队列 (发送)
+        env:
+          PGPASSWORD: password
+        run: |
+          echo "=== 🚀 无日志队列 (Unlogged) - Send ==="
+          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f send_fast.sql
+
+      - name: 压测 3 - 持久化队列 (消费/Pop)
+        env:
+          PGPASSWORD: password
+        run: |
+          echo "=== 🧱 持久化队列 (Durable) - Pop ==="
+          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f read_durable.sql
+
+      - name: 压测 4 - 无日志极速队列 (消费/Pop)
+        env:
+          PGPASSWORD: password
+        run: |
+          echo "=== 🚀 无日志队列 (Unlogged) - Pop ==="
+          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f read_fast.sql
