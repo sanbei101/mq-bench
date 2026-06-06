@@ -43,7 +43,10 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y postgresql-client
-
+      - name: 注入环境变量
+        run: |
+          echo "CLIENTS=${{ inputs.clients || '50' }}" >> $GITHUB_ENV
+          echo "DURATION=${{ inputs.duration || '20' }}" >> $GITHUB_ENV
       - name: 初始化 PGMQ 扩展和队列
         env:
           PGPASSWORD: password
@@ -54,7 +57,7 @@ jobs:
 
       - name: 生成 pgbench 测试脚本
         run: |
-          # === 持久化队列 (Durable) 脚本 ===
+          # === 持久化队列脚本 ===
           echo "SELECT * FROM pgmq.send(queue_name => 'bench_durable', msg => '{\"t\": 1}');" > send_single_durable.sql
           echo "SELECT * FROM pgmq.send_batch(queue_name => 'bench_durable', msgs => ARRAY['{\"t\":1}','{\"t\":2}','{\"t\":3}','{\"t\":4}','{\"t\":5}']::jsonb[]);" > send_batch_durable.sql
           
@@ -76,28 +79,28 @@ jobs:
           PGPASSWORD: password
         run: |
           echo "=== 🧱 持久化队列 - Single Send ==="
-          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f send_single_durable.sql
+          pgbench -h localhost -U postgres -n -P 2 -c ${{ env.CLIENTS }} -T ${{ env.DURATION }} -f send_single_durable.sql pgmq_bench
 
       - name: 压测 1.2 - 无日志队列 (单次发送)
         env:
           PGPASSWORD: password
         run: |
           echo "=== 🚀 无日志队列 - Single Send ==="
-          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f send_single_fast.sql
+          pgbench -h localhost -U postgres -n -P 2 -c ${{ env.CLIENTS }} -T ${{ env.DURATION }} -f send_single_fast.sql pgmq_bench
 
       - name: 压测 1.3 - 持久化队列 (批量5条发送)
         env:
           PGPASSWORD: password
         run: |
           echo "=== 🧱 持久化队列 - Batch Send (x5) ==="
-          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f send_batch_durable.sql
+          pgbench -h localhost -U postgres -n -P 2 -c ${{ env.CLIENTS }} -T ${{ env.DURATION }} -f send_batch_durable.sql pgmq_bench
 
       - name: 压测 1.4 - 无日志队列 (批量5条发送)
         env:
           PGPASSWORD: password
         run: |
           echo "=== 🚀 无日志队列 - Batch Send (x5) ==="
-          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f send_batch_fast.sql
+          pgbench -h localhost -U postgres -n -P 2 -c ${{ env.CLIENTS }} -T ${{ env.DURATION }} -f send_batch_fast.sql pgmq_bench
 
       # ==========================================
       # 压测阶段 2: 消费性能对比 (Pop)
@@ -107,25 +110,25 @@ jobs:
           PGPASSWORD: password
         run: |
           echo "=== 🧱 持久化队列 - Single Pop ==="
-          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f pop_single_durable.sql
+          pgbench -h localhost -U postgres -n -P 2 -c ${{ env.CLIENTS }} -T ${{ env.DURATION }} -f pop_single_durable.sql pgmq_bench
 
       - name: 压测 2.2 - 无日志队列 (单次 Pop)
         env:
           PGPASSWORD: password
         run: |
           echo "=== 🚀 无日志队列 - Single Pop ==="
-          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f pop_single_fast.sql
+          pgbench -h localhost -U postgres -n -P 2 -c ${{ env.CLIENTS }} -T ${{ env.DURATION }} -f pop_single_fast.sql pgmq_bench
 
       - name: 压测 2.3 - 持久化队列 (批量5条 Pop)
         env:
           PGPASSWORD: password
         run: |
           echo "=== 🧱 持久化队列 - Batch Pop (x5) ==="
-          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f pop_batch_durable.sql
+          pgbench -h localhost -U postgres -n -P 2 -c ${{ env.CLIENTS }} -T ${{ env.DURATION }} -f pop_batch_durable.sql pgmq_bench
 
       - name: 压测 2.4 - 无日志队列 (批量5条 Pop)
         env:
           PGPASSWORD: password
         run: |
           echo "=== 🚀 无日志队列 - Batch Pop (x5) ==="
-          pgbench -h localhost -U postgres -d pgmq_bench -c ${{ github.event.inputs.clients }} -j 2 -T ${{ github.event.inputs.duration }} -f pop_batch_fast.sql
+          pgbench -h localhost -U postgres -n -P 2 -c ${{ env.CLIENTS }} -T ${{ env.DURATION }} -f pop_batch_fast.sql pgmq_bench
